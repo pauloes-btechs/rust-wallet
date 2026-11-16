@@ -38,6 +38,9 @@ if ! ln alice listchannels | grep -q "$BOB_PK"; then
   mine 6
 fi
 retry sh -c "$DC exec -T lnd-alice lncli --network=regtest listchannels --active_only | grep -q '$BOB_PK'"
+# "Active" is not "routable": the router learns the link's bandwidth a moment
+# later. Wait until a real route to bob exists before declaring ready.
+retry sh -c "$DC exec -T lnd-alice lncli --network=regtest queryroutes --dest '$BOB_PK' --amt 20000 | grep -q '\"total_amt\"'"
 
 # Credentials: copied out of the containers so they are readable by the host user.
 mkdir -p creds/alice creds/bob creds/litd
