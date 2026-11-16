@@ -172,11 +172,20 @@ impl NodeApi for ReplayBackend {
 pub struct ReplayDispatcher;
 
 impl rw_payments::Dispatcher for ReplayDispatcher {
-    async fn prepare(&self, _i: &rw_payments::PaymentIntent) -> Result<String, String> {
+    async fn prepare(&self, i: &rw_payments::PaymentIntent) -> Result<String, String> {
+        if i.kind == rw_payments::PaymentKind::Onchain {
+            return Ok(format!("rw-intent:{}", i.intent_id));
+        }
         body::<DecodedInvoiceView>("POST /invoices/decode").map(|d| d.payment_hash_hex).map_err(|e| e.to_string())
     }
 
-    async fn dispatch(&self, _i: &rw_payments::PaymentIntent, backend_ref: &str) -> rw_payments::DispatchOutcome {
+    async fn dispatch(&self, i: &rw_payments::PaymentIntent, backend_ref: &str) -> rw_payments::DispatchOutcome {
+        if i.kind == rw_payments::PaymentKind::Onchain {
+            return match body::<TxidView>("POST /onchain/send") {
+                Ok(t) => rw_payments::DispatchOutcome::Settled { backend_ref: t.txid },
+                Err(e) => rw_payments::DispatchOutcome::DefinitiveFailure { reason: e.to_string() },
+            };
+        }
         match body::<PaymentOutcomeView>("POST /payments") {
             Ok(o) if o.status == PaymentOutcomeStatus::Succeeded => {
                 rw_payments::DispatchOutcome::Settled { backend_ref: backend_ref.to_string() }

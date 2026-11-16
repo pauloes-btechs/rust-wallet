@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="rust-wallet: a Lightning wallet in Rust over Lightning Labs' litd. Demo replays a real regtest session." />
+    <title>rust-wallet</title>
+    <link data-trunk rel="css" href="style.css" />
+    <link data-trunk rel="icon" href="../src-tauri/icons/32x32.png" />
+    <!-- Current rustc emits bulk-memory, sign-ext and nontrapping-fptoint by default; let wasm-opt accept them. -->
+    <link data-trunk rel="rust" data-bin="rw-ui" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" />
+  </head>
+  <body></body>
+</html>

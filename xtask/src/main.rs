@@ -6,6 +6,9 @@
 //!   extract `litd` to `apps/desktop/src-tauri/binaries/litd-<triple>[.exe]`.
 //!   A mismatch is fatal: nothing is extracted or bundled.
 //! * `print-triple`: the Tauri target triple of this machine.
+//! * `externalize-boot <dist>`: move Trunk's inline `<script type="module">`
+//!   loader into `boot-<hash>.js`, so the page runs under a strict CSP
+//!   (`script-src 'self' 'wasm-unsafe-eval'`, no `'unsafe-inline'`).
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -114,6 +117,46 @@ fn from_zip(body: &[u8], member: &str) -> Result<Vec<u8>> {
     Ok(v)
 }
 
+/// Replace every inline module script in `index.html` with an external file.
+fn externalize_boot(dist: &Path) -> Result<()> {
+    let index = dist.join("index.html");
+    let mut html = std::fs::read_to_string(&index).with_context(|| format!("reading {}", index.display()))?;
+    let mut n = 0;
+    while let Some(start) = find_inline_module(&html) {
+        let open_end = start + html[start..].find('>').context("unterminated <script>")? + 1;
+        let close = open_end + html[open_end..].find("</script>").context("no </script>")?;
+        let body = html[open_end..close].trim().to_string();
+        let name = format!("boot-{}.js", &hex::encode(Sha256::digest(body.as_bytes()))[..16]);
+        std::fs::write(dist.join(&name), &body)?;
+        html.replace_range(
+            start..close + "</script>".len(),
+            &format!("<script type=\"module\" src=\"/{name}\"></script>"),
+        );
+        n += 1;
+    }
+    if html.contains("<script>") || find_inline_module(&html).is_some() {
+        bail!("index.html still has an inline script; CSP would block it");
+    }
+    std::fs::write(&index, html)?;
+    println!("externalized {n} inline script(s) in {}", index.display());
+    Ok(())
+}
+
+/// Byte offset of a `<script type="module" …>` tag that has no `src`.
+fn find_inline_module(html: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = html[from..].find("<script") {
+        let at = from + i;
+        let end = at + html[at..].find('>')?;
+        let tag = &html[at..=end];
+        if tag.contains("type=\"module\"") && !tag.contains("src=") {
+            return Some(at);
+        }
+        from = end;
+    }
+    None
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -137,13 +180,47 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some("externalize-boot") => {
+            let dist = PathBuf::from(args.get(1).context("usage: externalize-boot <dist>")?);
+            externalize_boot(&dist)
+        }
         Some("print-triple") => {
             println!("{}", host_triple());
             Ok(())
         }
         _ => {
-            eprintln!("usage: cargo xtask fetch-sidecars [--triple <triple> | --all]\n       cargo xtask print-triple");
+            eprintln!(
+                "usage: cargo xtask fetch-sidecars [--triple <triple> | --all]\n       cargo xtask externalize-boot <dist>\n       cargo xtask print-triple"
+            );
             std::process::exit(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_trunk_loader_out() {
+        let d = std::env::temp_dir().join(format!("rw-xtask-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("index.html"),
+            "<html><head><script type=\"module\" nonce=\"x\">\nimport init from '/a.js';\nawait init();\n</script><script type=\"module\" src=\"/keep.js\"></script></head></html>",
+        )
+        .unwrap();
+        externalize_boot(&d).unwrap();
+        let out = std::fs::read_to_string(d.join("index.html")).unwrap();
+        assert!(out.contains("src=\"/boot-"), "{out}");
+        assert!(out.contains("src=\"/keep.js\""));
+        assert!(!out.contains("import init"));
+        let boot = std::fs::read_dir(&d)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_name().to_string_lossy().starts_with("boot-"))
+            .unwrap();
+        assert!(std::fs::read_to_string(boot.path()).unwrap().starts_with("import init"));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
