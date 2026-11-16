@@ -1,0 +1,12 @@
+/target
+**/dist/
+harness/regtest/data/
+.env
+.env.*
+*.db
+*.db-journal
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/gen/
+._*
+.DS_Store
+.vercel

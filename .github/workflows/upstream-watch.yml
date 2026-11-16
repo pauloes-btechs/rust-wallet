@@ -1,0 +1,55 @@
+name: Upstream watch (Lightning Labs releases)
+
+# Weekly: compare the pinned litd/LND against the latest upstream releases.
+# If newer ones exist, run the regtest suite against them and open an issue
+# with the result. Nothing is re-pinned automatically: a new pin needs the
+# hash from the signed release manifest (see docs/UPSTREAM.md).
+on:
+  schedule:
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      litd_latest: ${{ steps.v.outputs.litd_latest }}
+      lnd_latest: ${{ steps.v.outputs.lnd_latest }}
+      stale: ${{ steps.v.outputs.stale }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(jq -r .litd.tag sidecars.lock.json)
+          litd=$(gh api repos/lightninglabs/lightning-terminal/releases/latest --jq .tag_name)
+          lnd=$(gh api repos/lightningnetwork/lnd/releases/latest --jq .tag_name)
+          echo "pinned litd $pinned · latest litd $litd · latest lnd $lnd"
+          echo "litd_latest=$litd" >> "$GITHUB_OUTPUT"
+          echo "lnd_latest=$lnd" >> "$GITHUB_OUTPUT"
+          if [ "$pinned" != "$litd" ]; then echo "stale=true" >> "$GITHUB_OUTPUT"; else echo "stale=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Open or update an issue
+        if: steps.v.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream: litd ${{ steps.v.outputs.litd_latest }} is out (pinned $(jq -r .litd.tag sidecars.lock.json))"
+          body="Latest litd: ${{ steps.v.outputs.litd_latest }} · latest LND: ${{ steps.v.outputs.lnd_latest }}.
+
+          To re-pin: copy the per-platform SHA-256 from the signed release manifest into sidecars.lock.json, update the image tags in harness/regtest/docker-compose.yml, re-vendor proto/ (see proto/upstream.json), and let CI + Regtest run. See docs/UPSTREAM.md."
+          existing=$(gh issue list --state open --search "in:title Upstream: litd ${{ steps.v.outputs.litd_latest }}" --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then gh issue create --title "$title" --body "$body"; fi
+      - name: Run regtest against the latest images
+        if: steps.v.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run regtest.yml --ref main \
+            -f litd_image=lightninglabs/lightning-terminal:${{ steps.v.outputs.litd_latest }} \
+            -f lnd_image=lightninglabs/lnd:${{ steps.v.outputs.lnd_latest }}

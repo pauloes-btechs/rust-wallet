@@ -1,0 +1,16 @@
+[package]
+name = "rw-replay"
+description = "NodeApi over litd responses recorded on regtest: the hosted demo and the contract test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rw-core.workspace = true
+rw-payments = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -1,0 +1,70 @@
+# rust-wallet regtest harness. REGTEST ONLY: credentials are throwaway.
+#
+# bitcoind is the chain of record. Two full-node LNDs (alice pays, bob is the
+# counterparty) and a litd in integrated mode exercise the Rust backend.
+# Host ports are loopback-bound and offset from Sovereign Wallet's harness
+# (+100) so both can run on one Mac at the same time.
+#
+# Image tags are the pins (match sidecars.lock.json: litd v0.17.8 bundles
+# LND v0.21.5-beta.rc1). RW_LND_IMAGE / RW_LITD_IMAGE override them for the
+# weekly upstream watch only.
+name: rw-regtest
+
+x-lnd: &lnd
+  image: ${RW_LND_IMAGE:-lightninglabs/lnd:v0.21.5-beta.rc1}
+  command: ["--lnddir=/root/.lnd", "--configfile=/lnd.conf"]
+  depends_on:
+    bitcoind:
+      condition: service_healthy
+  restart: on-failure
+
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:27.0
+    command:
+      - -regtest
+      - -printtoconsole
+      - -txindex
+      - -fallbackfee=0.0002
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcuser=regtest
+      - -rpcpassword=regtest
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+    ports:
+      - "127.0.0.1:18543:18443"
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=regtest", "-rpcpassword=regtest", "getblockchaininfo"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  lnd-alice:
+    <<: *lnd
+    ports:
+      - "127.0.0.1:10109:10009"
+    volumes:
+      - ./lnd-alice/lnd.conf:/lnd.conf:ro
+
+  lnd-bob:
+    <<: *lnd
+    ports:
+      - "127.0.0.1:10110:10009"
+    volumes:
+      - ./lnd-bob/lnd.conf:/lnd.conf:ro
+
+  # litd in integrated mode: its embedded LND is reachable on 10111 (raw LND
+  # gRPC) and litd's own RPC (lit/loop/pool/tapd/faraday proxy) on 8543.
+  litd:
+    image: ${RW_LITD_IMAGE:-lightninglabs/lightning-terminal:v0.17.8}
+    command: ["--configfile=/litd.conf"]
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    restart: on-failure
+    ports:
+      - "127.0.0.1:10111:19090"
+      - "127.0.0.1:8543:8443"
+    volumes:
+      - ./litd/litd.conf:/litd.conf:ro

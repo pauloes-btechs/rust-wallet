@@ -1,0 +1,52 @@
+name: Regtest (live LND + litd)
+
+# Release-blocking: pays real regtest invoices between two LNDs and proves the
+# payment engine never pays twice, including across a simulated crash.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      lnd_image:
+        description: Override LND image (upstream watch)
+        required: false
+      litd_image:
+        description: Override litd image (upstream watch)
+        required: false
+
+concurrency:
+  group: regtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RW_LND_IMAGE: ${{ inputs.lnd_image }}
+      RW_LITD_IMAGE: ${{ inputs.litd_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tests first (overlaps with image pulls)
+        run: cargo test -p rw-litd --features regtest --no-run
+      - name: Bootstrap harness (bitcoind, 2× LND, litd; fund + open channel)
+        run: |
+          [ -z "$RW_LND_IMAGE" ] && unset RW_LND_IMAGE
+          [ -z "$RW_LITD_IMAGE" ] && unset RW_LITD_IMAGE
+          harness/regtest/scripts/bootstrap.sh
+      - name: Live integration suite
+        run: |
+          source harness/regtest/.env.regtest
+          cargo test -p rw-litd --features regtest -- --test-threads=1 --nocapture
+      - name: CLI against alice
+        run: |
+          source harness/regtest/.env.regtest
+          cargo run -q -p rw-cli -- --endpoint "$RW_ALICE_ENDPOINT" --tls-cert "$RW_ALICE_CERT" --macaroon "$RW_ALICE_MACAROON" --db /tmp/rw.db status
+          cargo run -q -p rw-cli -- --endpoint "$RW_ALICE_ENDPOINT" --tls-cert "$RW_ALICE_CERT" --macaroon "$RW_ALICE_MACAROON" --db /tmp/rw.db balance
+          cargo run -q -p rw-cli -- --endpoint "$RW_ALICE_ENDPOINT" --tls-cert "$RW_ALICE_CERT" --macaroon "$RW_ALICE_MACAROON" --db /tmp/rw.db intents
+      - name: Harness logs
+        if: failure()
+        run: docker compose -f harness/regtest/docker-compose.yml logs --tail=200
