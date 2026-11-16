@@ -7,7 +7,7 @@
     "frontendDist": "../ui/dist",
     "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": { "script": "trunk serve --port 1420", "cwd": "../ui" },
-    "beforeBuildCommand": { "script": "bash ../../scripts/build-web.sh desktop", "cwd": "../ui" }
+    "beforeBuildCommand": { "script": "bash ../../../scripts/build-web.sh desktop", "cwd": "../ui" }
   },
   "app": {
     "withGlobalTauri": true,

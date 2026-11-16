@@ -4,8 +4,8 @@
 
 | Target | Runner | Bundles |
 | --- | --- | --- |
-| aarch64-apple-darwin | macos-14 | `.app`, `.dmg` |
-| x86_64-apple-darwin | macos-14 (cross) | `.app`, `.dmg` |
+| aarch64-apple-darwin | macos-latest | `.app`, `.dmg` |
+| x86_64-apple-darwin | macos-latest (cross) | `.app`, `.dmg` |
 | x86_64-pc-windows-msvc | windows-latest | NSIS `.exe`, `.msi` |
 | x86_64-unknown-linux-gnu | ubuntu-22.04 | `.deb`, `.AppImage`, `.rpm` |
 
