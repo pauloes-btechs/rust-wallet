@@ -10,11 +10,11 @@ if ! command -v rustup > /dev/null 2>&1; then
 fi
 rustup show active-toolchain || rustup toolchain install stable --profile minimal
 rustup target add wasm32-unknown-unknown
-# trunk goes in the repo-local .bin (on PATH in build-web.sh), not a guessed CARGO_HOME.
+# trunk (static musl build: Vercel's image has an older glibc) goes in the repo-local .bin (on PATH in build-web.sh), not a guessed CARGO_HOME.
 mkdir -p "$root/.bin"
 if [ ! -x "$root/.bin/trunk" ]; then
   arch=$(uname -m)
-  curl -sSL "https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-${arch}-unknown-linux-gnu.tar.gz" | tar -xz -C "$root/.bin" trunk
+  curl -sSL "https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-${arch}-unknown-linux-musl.tar.gz" | tar -xz -C "$root/.bin" trunk
 fi
 "$root/.bin/trunk" --version
 cargo --version
