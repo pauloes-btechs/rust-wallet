@@ -74,15 +74,27 @@ pub enum ConnectError {
 
 /// Connect with the node's pinned certificate and macaroon.
 pub async fn connect(cfg: &ConnectConfig) -> Result<LitdClient, ConnectError> {
-    let (host, port) = cfg
-        .endpoint
-        .rsplit_once(':')
-        .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h.trim_matches(['[', ']']).to_string(), p)))
-        .ok_or_else(|| ConfigError::Endpoint(cfg.endpoint.clone()))?;
-    let cert = cfg.read_cert_der()?;
     let mac_hex = cfg.read_macaroon_hex()?;
     let macaroon =
         Macaroon(mac_hex.parse().map_err(|_| ConfigError::Endpoint("macaroon is not valid metadata".into()))?);
+    let channel = channel(&cfg.endpoint, cfg.read_cert_der()?).await?;
+    Ok(LitdClient { channel, macaroon })
+}
+
+/// The wallet unlocker (GenSeed / InitWallet / UnlockWallet) answers before
+/// any macaroon exists, so it needs only the pinned certificate.
+pub async fn connect_unlocker(
+    cfg: &ConnectConfig,
+) -> Result<lnrpc::wallet_unlocker_client::WalletUnlockerClient<Channel>, ConnectError> {
+    let channel = channel(&cfg.endpoint, cfg.read_cert_der()?).await?;
+    Ok(lnrpc::wallet_unlocker_client::WalletUnlockerClient::new(channel))
+}
+
+async fn channel(endpoint: &str, cert: Vec<u8>) -> Result<Channel, ConnectError> {
+    let (host, port) = endpoint
+        .rsplit_once(':')
+        .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h.trim_matches(['[', ']']).to_string(), p)))
+        .ok_or_else(|| ConfigError::Endpoint(endpoint.to_string()))?;
     let tls = tokio_rustls::TlsConnector::from(Arc::new(tls::client_config(cert)));
 
     let connector = tower::service_fn(move |_uri: http::Uri| {
@@ -99,11 +111,10 @@ pub async fn connect(cfg: &ConnectConfig) -> Result<LitdClient, ConnectError> {
     });
 
     // Plain-http URI: TLS is done by our connector, not by tonic.
-    let channel = Endpoint::from_shared(format!("http://{}", cfg.endpoint))?
+    Ok(Endpoint::from_shared(format!("http://{endpoint}"))?
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
         .tcp_keepalive(Some(Duration::from_secs(30)))
         .connect_with_connector(connector)
-        .await?;
-    Ok(LitdClient { channel, macaroon })
+        .await?)
 }

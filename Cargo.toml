@@ -6,6 +6,8 @@ members = [
   "crates/rw-litd",
   "crates/rw-replay",
   "crates/rw-cli",
+  "apps/desktop/ui",
+  "apps/desktop/src-tauri",
   "xtask",
 ]
 default-members = [

@@ -66,22 +66,30 @@ fn new_intent_id() -> String {
 }
 
 impl LitdBackend {
-    /// Connect, apply the mainnet guard if the wallet is unlocked, probe litd
-    /// sub-servers to declare capabilities, and reconcile any payment that a
-    /// previous run left interrupted.
+    /// Connect, apply the mainnet guard, probe litd sub-servers to declare
+    /// capabilities, and, if the wallet is unlocked, reconcile any payment a
+    /// previous run left interrupted. With a locked wallet recovery is
+    /// deferred to [`Self::recover_if_ready`]: a lookup against a locked node
+    /// would wrongly escalate in-flight payments to needs-recovery.
     pub async fn open(
         cfg: &ConnectConfig,
         store: Arc<dyn IntentStore>,
     ) -> Result<(Self, RecoveryReport), BackendOpenError> {
         let client = connect(cfg).await?;
         let backend = Self::from_client(client, cfg.mainnet, store).await;
-        if let Ok(info) = backend.client.lightning().get_info(lnrpc::GetInfoRequest {}).await {
-            let net = map::node_health(&info.into_inner()).network().ok_or(BackendOpenError::UnknownNetwork)?;
-            cfg.mainnet.check(net)?;
-        }
-        let report =
-            backend.engine.recover_interrupted().await.map_err(|e| BackendOpenError::Recovery(e.to_string()))?;
+        let report = backend.recover_if_ready().await?;
         Ok((backend, report))
+    }
+
+    /// Mainnet guard + crash recovery, only once the node answers GetInfo.
+    /// Returns an empty report while the wallet is locked or still starting.
+    pub async fn recover_if_ready(&self) -> Result<RecoveryReport, BackendOpenError> {
+        let Ok(info) = self.client.lightning().get_info(lnrpc::GetInfoRequest {}).await else {
+            return Ok(RecoveryReport::default());
+        };
+        let net = map::node_health(&info.into_inner()).network().ok_or(BackendOpenError::UnknownNetwork)?;
+        self.mainnet.check(net)?;
+        self.engine.recover_interrupted().await.map_err(|e| BackendOpenError::Recovery(e.to_string()))
     }
 
     pub async fn from_client(client: LitdClient, mainnet: MainnetPolicy, store: Arc<dyn IntentStore>) -> Self {

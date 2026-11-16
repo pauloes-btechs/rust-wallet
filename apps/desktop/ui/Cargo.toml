@@ -1,0 +1,23 @@
+[package]
+name = "rw-ui"
+description = "rust-wallet UI in Leptos (CSR → WASM): the desktop app's frontend and the hosted demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rw-core.workspace = true
+rw-payments.workspace = true
+rw-replay.workspace = true
+leptos = { version = "0.8", features = ["csr"] }
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Document", "HtmlAnchorElement", "Location"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+console_error_panic_hook = "0.1"

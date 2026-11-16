@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window may call the app's own commands and Tauri core only. No shell, fs or http plugins: all node access goes through the Rust backend.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

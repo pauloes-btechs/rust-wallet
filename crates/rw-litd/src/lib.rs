@@ -26,8 +26,8 @@ pub mod map;
 pub mod sidecar;
 mod tls;
 
-pub use backend::LitdBackend;
-pub use client::{connect, LitdClient};
+pub use backend::{BackendOpenError, LitdBackend};
+pub use client::{connect, connect_unlocker, ConnectError, LitdClient};
 pub use config::{ConfigError, ConnectConfig};
 pub use dispatcher::{default_fee_cap_sat, LndDispatcher};
 

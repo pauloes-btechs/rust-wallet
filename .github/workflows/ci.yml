@@ -25,12 +25,60 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --exclude rw-desktop --exclude rw-ui --all-targets -- -D warnings
       - run: cargo clippy -p rw-litd --features regtest --tests -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo test --workspace --exclude rw-desktop --exclude rw-ui
       - name: rw CLI over the recorded litd session
         run: |
           cargo run -q -p rw-cli -- --replay status
           cargo run -q -p rw-cli -- --replay balance
           cargo run -q -p rw-cli -- --replay channels
 
+  wasm:
+    name: web demo (Leptos → WASM, what Vercel serves)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install trunk
+        run: |
+          curl -sSL https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /usr/local/bin trunk
+          trunk --version
+      - run: cargo clippy -p rw-ui --target wasm32-unknown-unknown -- -D warnings
+      - name: Build the hosted demo
+        run: bash scripts/build-web.sh
+      - name: Demo bundle has no network endpoints
+        run: |
+          ! grep -RIl --include='*.js' -E "https?://(127\.0\.0\.1|localhost)" dist/ || (echo "demo bundle references a local endpoint" && exit 1)
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-demo
+          path: dist
+
+  desktop:
+    name: desktop (Tauri) · build UI + clippy + tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux webview deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Install trunk
+        run: curl -sSL https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/local/bin trunk
+      - name: Fetch + verify the litd sidecar (sha256 pinned)
+        run: cargo xtask fetch-sidecars
+      - name: Build the desktop frontend
+        run: bash scripts/build-web.sh desktop
+      - run: cargo clippy -p rw-desktop --all-targets -- -D warnings
+      - run: cargo test -p rw-desktop
