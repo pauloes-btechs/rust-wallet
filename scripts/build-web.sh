@@ -8,6 +8,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+export PATH="$root/.bin:$PATH"   # trunk from scripts/vercel-install.sh, if used
 
 cd "$root/apps/desktop/ui"
 trunk build --release

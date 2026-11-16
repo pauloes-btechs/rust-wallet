@@ -10,3 +10,4 @@ apps/desktop/src-tauri/gen/
 ._*
 .DS_Store
 .vercel
+/.bin/
