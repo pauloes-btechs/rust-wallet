@@ -6,7 +6,8 @@
 //! * On-chain: LND's `SendCoins` builds, signs and broadcasts in one call, so
 //!   the txid is not known in advance. Instead the intent's reconciliation key
 //!   is a unique transaction **label** (`rw-intent:<id>`), persisted before the
-//!   broadcast. `lookup` searches `GetTransactions` for that label.
+//!   broadcast. `lookup` searches `GetTransactions` for that label; a missing
+//!   label is ambiguous (needs recovery), not proof the send never happened.
 
 use crate::client::LitdClient;
 use crate::proto::{lnrpc, routerrpc};
@@ -157,10 +158,7 @@ impl LndDispatcher {
     async fn find_label(&self, intent: &PaymentIntent) -> ReconcileResult {
         let want = label(intent);
         match self.client.lightning().get_transactions(lnrpc::GetTransactionsRequest::default()).await {
-            Ok(r) => match r.into_inner().transactions.into_iter().find(|t| t.label == want) {
-                Some(t) => ReconcileResult::Settled { backend_ref: t.tx_hash },
-                None => ReconcileResult::NotFound,
-            },
+            Ok(r) => label_lookup(r.into_inner().transactions, &want),
             Err(_) => ReconcileResult::Unknown,
         }
     }
@@ -209,6 +207,16 @@ fn classify_send_error(s: &tonic::Status) -> DispatchOutcome {
         | Code::PermissionDenied
         | Code::Unauthenticated => DispatchOutcome::DefinitiveFailure { reason: s.message().to_string() },
         _ => DispatchOutcome::Timeout,
+    }
+}
+
+/// A missing label is never proof that nothing was sent: a timed-out
+/// SendCoins may still broadcast, and SendCoins has no idempotency key. So
+/// an absent label means needs-recovery (a human decides), never not-found.
+fn label_lookup(txs: Vec<lnrpc::Transaction>, want: &str) -> ReconcileResult {
+    match txs.into_iter().find(|t| t.label == want) {
+        Some(t) => ReconcileResult::Settled { backend_ref: t.tx_hash },
+        None => ReconcileResult::Unknown,
     }
 }
 
@@ -275,6 +283,16 @@ mod tests {
         ] {
             assert!(matches!(classify_coins_error(&s), DispatchOutcome::DefinitiveFailure { .. }), "{s:?}");
         }
+    }
+
+    #[test]
+    fn missing_onchain_label_is_unknown_not_not_found() {
+        let tx = |label: &str| lnrpc::Transaction { label: label.into(), tx_hash: "tx".into(), ..Default::default() };
+        assert_eq!(label_lookup(vec![tx("other")], "rw-intent:1"), ReconcileResult::Unknown);
+        assert_eq!(
+            label_lookup(vec![tx("other"), tx("rw-intent:1")], "rw-intent:1"),
+            ReconcileResult::Settled { backend_ref: "tx".into() }
+        );
     }
 
     #[test]
