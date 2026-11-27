@@ -3,6 +3,7 @@ use crate::{
     StoreError,
 };
 use std::future::Future;
+use std::sync::OnceLock;
 use thiserror::Error;
 
 /// Outcome of ONE dispatch attempt. `Sent` and `Timeout` are deliberately
@@ -59,6 +60,7 @@ pub struct PaymentEngine<S, D> {
     new_id: IdGen,
     now: Clock,
     policy: Option<Policy>,
+    node: OnceLock<String>,
 }
 
 impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
@@ -70,7 +72,25 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
         new_id: impl Fn() -> String + Send + Sync + 'static,
         now: impl Fn() -> String + Send + Sync + 'static,
     ) -> Self {
-        Self { store, dispatcher, new_id: Box::new(new_id), now: Box::new(now), policy: None }
+        Self { store, dispatcher, new_id: Box::new(new_id), now: Box::new(now), policy: None, node: OnceLock::new() }
+    }
+
+    /// The node this engine pays from (its identity pubkey), learned once the
+    /// node answers GetInfo. The journal can be shared by several nodes, so new
+    /// intents are stamped with it and recovery skips other nodes' intents.
+    /// The first value wins: a backend talks to one node.
+    pub fn set_node(&self, identity_pubkey: &str) {
+        let _ = self.node.set(identity_pubkey.to_string());
+    }
+
+    /// Whether `intent` belongs to this engine's node. Intents with no node
+    /// (journaled before nodes were recorded) and engines that do not know
+    /// their node keep the old single-node behavior.
+    pub fn owns(&self, intent: &PaymentIntent) -> bool {
+        match (self.node.get(), &intent.node) {
+            (Some(me), Some(n)) => me == n,
+            _ => true,
+        }
     }
 
     /// Spend/fee policy, enforced at authorization: rejecting here fails the
@@ -110,6 +130,7 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
     ) -> Result<PaymentIntent, EngineError> {
         let mut draft = PaymentIntent::new((self.new_id)(), kind, destination, amount_sat, max_fee_sat);
         draft.sat_per_vbyte = sat_per_vbyte;
+        draft.node = self.node.get().cloned();
         self.store.save(&draft)?;
         if let Some(policy) = &self.policy {
             if let Err(reason) = policy(&draft) {
@@ -154,12 +175,12 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
         Ok(next)
     }
 
-    /// Startup crash recovery: every `Signing`/`InFlight` intent is looked up
-    /// and reconciled. This method never calls `Dispatcher::dispatch`.
+    /// Startup crash recovery: every `Signing`/`InFlight` intent of this node
+    /// is looked up and reconciled. This method never calls `Dispatcher::dispatch`.
     pub async fn recover_interrupted(&self) -> Result<RecoveryReport, EngineError> {
         let mut report = RecoveryReport::default();
         for intent in self.store.list()? {
-            if !intent.state.is_interrupted() {
+            if !intent.state.is_interrupted() || !self.owns(&intent) {
                 continue;
             }
             // A `Signing` intent never got a backend ref persisted, so nothing

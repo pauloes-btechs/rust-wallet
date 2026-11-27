@@ -257,7 +257,7 @@ async fn run(cli: &Cli) -> Result<()> {
             });
         }
         Cmd::Recover => {
-            let r = backend.engine().recover_interrupted().await?;
+            let r = backend.recover_if_ready().await?;
             println!("reconciled: {:?}\nneeds recovery: {:?}", r.reconciled, r.needs_recovery);
             return Ok(());
         }

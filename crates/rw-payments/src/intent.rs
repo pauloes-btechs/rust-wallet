@@ -78,6 +78,11 @@ pub struct PaymentIntent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
     pub attempts: Vec<Attempt>,
+    /// Identity pubkey of the node this intent was submitted to. Recovery
+    /// only reconciles its own node's intents. None: journaled before this
+    /// field existed, or by an engine that does not know its node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -134,6 +139,7 @@ impl PaymentIntent {
             backend_ref: None,
             failure_reason: None,
             attempts: Vec::new(),
+            node: None,
         }
     }
 
