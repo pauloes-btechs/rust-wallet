@@ -7,7 +7,7 @@
 
 use crate::{ApiError, Network};
 use bech32::primitives::decode::CheckedHrpstring;
-use bech32::{Checksum, Fe32};
+use bech32::Checksum;
 
 /// BOLT-11 uses the bech32 checksum without bech32's 90-character limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +106,6 @@ fn parse_bolt11(s: &str) -> Result<Destination, ApiError> {
     if checked.fe32_iter::<std::vec::IntoIter<u8>>().count() < 7 + 104 {
         return Err(ApiError::Invalid("lightning invoice is truncated".into()));
     }
-    let _ = Fe32::Q; // keep the import meaningful across bech32 minor versions
     Ok(Destination::Bolt11 { invoice: s.to_string(), network, amount_msat })
 }
 
