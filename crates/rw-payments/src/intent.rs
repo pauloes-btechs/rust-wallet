@@ -185,7 +185,7 @@ impl PaymentIntent {
         let (state, attempt) = match result {
             ReconcileResult::Settled { .. } => (IntentState::Settled, AttemptResult::Resolved),
             ReconcileResult::Failed { .. } => (IntentState::Failed, AttemptResult::Rejected),
-            ReconcileResult::NotFound => (IntentState::Failed, AttemptResult::Rejected),
+            ReconcileResult::NotFound => (IntentState::Failed, AttemptResult::Unknown),
             ReconcileResult::Unknown => (IntentState::NeedsRecovery, AttemptResult::Unknown),
         };
         let mut next = self.to(state);

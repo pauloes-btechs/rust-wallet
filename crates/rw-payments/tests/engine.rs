@@ -214,7 +214,8 @@ mod crash_recovery {
         let i = e.submit(PaymentKind::Onchain, "bcrt1…", Some(1000), None).unwrap();
         store.save(&i.begin_signing().unwrap()).unwrap();
         e.recover_interrupted().await.unwrap();
-        assert_eq!(e.get(&i.intent_id).unwrap().state, IntentState::Failed);
+        let f = e.get(&i.intent_id).unwrap();
+        assert_eq!((f.state, f.failure_reason.as_deref()), (IntentState::Failed, Some(NEVER_REACHED_NODE)));
         assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
     }
 
@@ -256,6 +257,38 @@ mod crash_recovery {
         let e = engine(store.clone(), fake.clone());
         e.set_node("node-a");
         assert_eq!(e.recover_interrupted().await.unwrap().reconciled, vec![i.intent_id]);
+    }
+
+    /// A legacy intent may have been sent from another node, so "not found
+    /// here" escalates to a human instead of failing it.
+    #[tokio::test]
+    async fn legacy_intent_not_found_needs_recovery() {
+        let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
+        let fake = Arc::new(Fake::default());
+        let legacy = engine(store.clone(), fake.clone());
+        let i = legacy.submit(PaymentKind::LightningInvoice, "lnbcrt…", None, None).unwrap();
+        legacy.execute(&i.intent_id).await.unwrap();
+
+        *fake.lookup_result.lock().unwrap() = Some(ReconcileResult::NotFound);
+        let e = engine(store.clone(), fake.clone());
+        e.set_node("node-b");
+        assert_eq!(e.recover_interrupted().await.unwrap().needs_recovery, vec![i.intent_id]);
+    }
+
+    /// An engine that never learned its node leaves stamped intents alone.
+    #[tokio::test]
+    async fn engine_without_node_skips_stamped_intents() {
+        let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
+        let fake = Arc::new(Fake::default());
+        let a = engine(store.clone(), fake.clone());
+        a.set_node("node-a");
+        let i = a.submit(PaymentKind::Onchain, "bcrt1…", Some(1000), None).unwrap();
+        a.execute(&i.intent_id).await.unwrap();
+
+        let unknown = engine(store.clone(), fake.clone());
+        assert_eq!(unknown.recover_interrupted().await.unwrap(), RecoveryReport::default());
+        assert_eq!(unknown.unresolved(PaymentKind::Onchain).unwrap(), None);
+        assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

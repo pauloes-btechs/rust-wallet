@@ -241,8 +241,16 @@ impl NodeApi for LitdBackend {
         if let Some(i) =
             self.engine.unresolved(PaymentKind::Onchain).map_err(|e| ApiError::PaymentSafety(e.to_string()))?
         {
+            let how = if i.state == IntentState::NeedsRecovery {
+                format!(
+                    "check the wallet history, then run `rw resolve {} --settled <txid>` or `--failed`",
+                    i.intent_id
+                )
+            } else {
+                "reconnect (or run `rw recover`) to reconcile it".to_string()
+            };
             return Err(ApiError::PaymentSafety(format!(
-                "on-chain send {} is not resolved yet; reconnect (or run `rw recover`) to reconcile it before sending again",
+                "on-chain send {} is not resolved yet; {how} before sending again",
                 i.intent_id
             )));
         }

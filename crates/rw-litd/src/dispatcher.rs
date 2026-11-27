@@ -88,12 +88,16 @@ impl Dispatcher for LndDispatcher {
 
 impl LndDispatcher {
     async fn pay(&self, intent: &PaymentIntent, hash: &str) -> DispatchOutcome {
+        // prepare already refused this; nothing has been sent, so failing is safe.
+        let Ok(fee_cap) = fee_cap(intent) else {
+            return DispatchOutcome::DefinitiveFailure { reason: "lightning payment needs a fee cap".into() };
+        };
         let amount = intent.amount_sat.unwrap_or(0);
         let req = routerrpc::SendPaymentRequest {
             payment_request: intent.destination.clone(),
             // Only for zero-amount invoices; LND rejects amt on fixed-amount ones.
             amt: if amount > 0 { amount as i64 } else { 0 },
-            fee_limit_sat: fee_cap(intent).expect("prepare rejects a missing fee cap") as i64,
+            fee_limit_sat: fee_cap as i64,
             timeout_seconds: (PAY_TIMEOUT.as_secs() - 5) as i32,
             no_inflight_updates: true,
             ..Default::default()
