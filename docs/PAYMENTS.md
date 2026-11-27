@@ -36,6 +36,9 @@ Draft ─authorize─▶ Authorized ─sign─▶ Signing ─dispatch─▶ InFl
 LND's `SendCoins` builds, signs and broadcasts in one call, so a txid isn't
 known in advance. The unique label is persisted first and attached to the
 transaction, which makes on-chain sends reconcilable too.
+`SendCoins` has no idempotency key, so while any on-chain intent of the
+node is `InFlight` or `NeedsRecovery`, a new on-chain send is refused until
+recovery (on reconnect, or `rw recover`) or `rw resolve` closes it.
 
 ## Fee policy
 

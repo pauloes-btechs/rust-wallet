@@ -236,6 +236,16 @@ impl NodeApi for LitdBackend {
         if req.amount_sat == 0 {
             return Err(ApiError::Invalid("amount must be greater than zero".into()));
         }
+        // SendCoins has no idempotency key: after an ambiguous error a second
+        // send could broadcast a second transaction. Wait for reconciliation.
+        if let Some(i) =
+            self.engine.unresolved(PaymentKind::Onchain).map_err(|e| ApiError::PaymentSafety(e.to_string()))?
+        {
+            return Err(ApiError::PaymentSafety(format!(
+                "on-chain send {} is not resolved yet; reconnect (or run `rw recover`) to reconcile it before sending again",
+                i.intent_id
+            )));
+        }
         let intent = self
             .engine
             .submit_with_rate(PaymentKind::Onchain, d.as_str(), Some(req.amount_sat), None, req.sat_per_vbyte)
