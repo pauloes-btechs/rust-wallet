@@ -160,9 +160,10 @@ mod crash_recovery {
     }
 
     /// Crash between "persist in-flight" and the network call: the backend has
-    /// never seen it, so one re-signed retry is allowed.
+    /// never seen it. The intent fails instead of sitting in `Authorized`
+    /// with nothing to re-execute it.
     #[tokio::test]
-    async fn not_found_allows_exactly_one_safe_retry() {
+    async fn not_found_fails_as_never_reached_node() {
         let fake = Arc::new(Fake::default());
         let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
         let e = engine(store.clone(), fake.clone());
@@ -171,25 +172,24 @@ mod crash_recovery {
         store.save(&in_flight).unwrap();
 
         *fake.lookup_result.lock().unwrap() = Some(ReconcileResult::NotFound);
-        e.recover_interrupted().await.unwrap();
-        assert_eq!(e.get(&i.intent_id).unwrap().state, IntentState::Authorized);
+        let report = e.recover_interrupted().await.unwrap();
+        assert_eq!(report.reconciled, vec![i.intent_id.clone()]);
+        let failed = e.get(&i.intent_id).unwrap();
+        assert_eq!((failed.state, failed.failure_reason.as_deref()), (IntentState::Failed, Some(NEVER_REACHED_NODE)));
+        assert!(e.execute(&i.intent_id).await.is_err(), "a failed intent is never executed again");
         assert_eq!(fake.dispatches.load(Ordering::SeqCst), 0);
-
-        *fake.outcome.lock().unwrap() = Some(DispatchOutcome::Settled { backend_ref: "hash-intent-0".into() });
-        assert_eq!(e.execute(&i.intent_id).await.unwrap().state, IntentState::Settled);
-        assert_eq!(fake.dispatches.load(Ordering::SeqCst), 1);
     }
 
     /// Crash while signing: nothing had a backend ref, so no lookup is needed.
     #[tokio::test]
-    async fn signing_returns_to_authorized_without_lookup() {
+    async fn signing_fails_without_lookup() {
         let fake = Arc::new(Fake::default());
         let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
         let e = engine(store.clone(), fake.clone());
         let i = e.submit(PaymentKind::Onchain, "bcrt1…", Some(1000), None).unwrap();
         store.save(&i.begin_signing().unwrap()).unwrap();
         e.recover_interrupted().await.unwrap();
-        assert_eq!(e.get(&i.intent_id).unwrap().state, IntentState::Authorized);
+        assert_eq!(e.get(&i.intent_id).unwrap().state, IntentState::Failed);
         assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
     }
 

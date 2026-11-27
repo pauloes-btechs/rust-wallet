@@ -4,8 +4,8 @@
 
 ```
 Draft ─authorize─▶ Authorized ─sign─▶ Signing ─dispatch─▶ InFlight ─┬─▶ Settled
-  │                    ▲                 │                          ├─▶ Failed
-  └──fail──▶ Failed    └── not-found ◀───┴──── reconcile ───────────┴─▶ NeedsRecovery ─resolve─▶ Settled | Failed
+  │                                      │                          ├─▶ Failed (incl. not found)
+  └──fail──▶ Failed                      └──────── reconcile ───────┴─▶ NeedsRecovery ─resolve─▶ Settled | Failed
 ```
 
 ## Rules
@@ -16,7 +16,9 @@ Draft ─authorize─▶ Authorized ─sign─▶ Signing ─dispatch─▶ InFl
    when it returns.
 2. **Reconcile, never re-dispatch.** On startup (and after unlock),
    `recover_interrupted` looks every `Signing`/`InFlight` intent up. It has
-   no code path to `dispatch`.
+   no code path to `dispatch`. An intent the node never saw (not found, or
+   still `Signing`) becomes `Failed` ("never reached node"); the user sends
+   again as a new intent.
 3. **Ambiguity stays ambiguous.** A timeout, a dropped stream, or LND saying
    "already paid / in transition" leaves the intent `InFlight`. Only a
    definitive answer settles or fails it. An unknown lookup becomes
@@ -46,7 +48,7 @@ for 6 blocks; the fee is shown before confirmation.
 
 - `crates/rw-payments/tests/engine.rs`: persist-before-dispatch (the store is
   read *inside* dispatch), double execute refused, crash-after-send
-  reconciled with SQLite across a dropped engine, not-found allows one retry,
+  reconciled with SQLite across a dropped engine, not-found fails the intent,
   policy rejection fails before signing.
 - `crates/rw-litd/tests/regtest.rs`, against two real LNDs in CI:
   - paying the same invoice twice: one payment, second intent reconciled to
