@@ -42,7 +42,7 @@ pub enum EngineError {
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RecoveryReport {
-    /// Interrupted intents reconciled to a definite state (incl. safe retry).
+    /// Interrupted intents reconciled to a definite state (incl. never-sent → failed).
     pub reconciled: Vec<String>,
     /// Interrupted intents whose fate is unknown: they need a human.
     pub needs_recovery: Vec<String>,

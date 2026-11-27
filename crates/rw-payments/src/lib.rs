@@ -15,8 +15,8 @@
 //!
 //! ```text
 //! Draft ─authorize─▶ Authorized ─sign─▶ Signing ─dispatch─▶ InFlight ─┬─▶ Settled
-//!   │                    ▲                 │                          ├─▶ Failed
-//!   └──fail──▶ Failed    └── not-found ◀───┴──── reconcile ───────────┴─▶ NeedsRecovery ─resolve─▶ Settled | Failed
+//!   │                                      │                          ├─▶ Failed (incl. not found)
+//!   └──fail──▶ Failed                      └──────── reconcile ───────┴─▶ NeedsRecovery ─resolve─▶ Settled | Failed
 //! ```
 //!
 //! The engine is runtime-agnostic (no tokio), so it also runs in the WASM
@@ -31,7 +31,7 @@ mod store;
 pub use engine::{DispatchOutcome, Dispatcher, EngineError, PaymentEngine, RecoveryReport};
 pub use intent::{
     Attempt, AttemptResult, IntentState, InvalidTransition, PaymentIntent, PaymentKind, ReconcileResult,
-    RecoveryOutcome,
+    RecoveryOutcome, NEVER_REACHED_NODE,
 };
 #[cfg(feature = "sqlite")]
 pub use store::SqliteStore;

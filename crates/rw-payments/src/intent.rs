@@ -98,7 +98,8 @@ pub enum ReconcileResult {
     },
     /// The backend knows the payment but it has not resolved, or the lookup itself failed.
     Unknown,
-    /// Nothing ever reached the backend: one re-signed retry is safe.
+    /// Nothing ever reached the backend. Recovery fails the intent: nothing
+    /// re-executes it, so returning it to `Authorized` would strand it.
     NotFound,
 }
 
@@ -110,6 +111,9 @@ pub enum RecoveryOutcome {
 }
 
 type T = Result<PaymentIntent, InvalidTransition>;
+
+/// Failure reason for an interrupted intent the backend never saw.
+pub const NEVER_REACHED_NODE: &str = "never reached node";
 
 impl PaymentIntent {
     pub fn new(
@@ -175,7 +179,7 @@ impl PaymentIntent {
         let (state, attempt) = match result {
             ReconcileResult::Settled { .. } => (IntentState::Settled, AttemptResult::Resolved),
             ReconcileResult::Failed { .. } => (IntentState::Failed, AttemptResult::Rejected),
-            ReconcileResult::NotFound => (IntentState::Authorized, AttemptResult::Unknown),
+            ReconcileResult::NotFound => (IntentState::Failed, AttemptResult::Rejected),
             ReconcileResult::Unknown => (IntentState::NeedsRecovery, AttemptResult::Unknown),
         };
         let mut next = self.to(state);
@@ -183,7 +187,8 @@ impl PaymentIntent {
         match result {
             ReconcileResult::Settled { backend_ref } => next.backend_ref = Some(backend_ref.clone()),
             ReconcileResult::Failed { reason } => next.failure_reason = reason.clone(),
-            _ => {}
+            ReconcileResult::NotFound => next.failure_reason = Some(NEVER_REACHED_NODE.into()),
+            ReconcileResult::Unknown => {}
         }
         Ok(next)
     }
@@ -266,7 +271,8 @@ mod tests {
     #[test]
     fn reconcile_outcomes() {
         let i = in_flight();
-        assert_eq!(i.reconcile(&ReconcileResult::NotFound, "t").unwrap().state, Authorized);
+        let n = i.reconcile(&ReconcileResult::NotFound, "t").unwrap();
+        assert_eq!((n.state, n.failure_reason.as_deref()), (Failed, Some(NEVER_REACHED_NODE)));
         assert_eq!(i.reconcile(&ReconcileResult::Unknown, "t").unwrap().state, NeedsRecovery);
         let f = i.reconcile(&ReconcileResult::Failed { reason: Some("no route".into()) }, "t").unwrap();
         assert_eq!((f.state, f.failure_reason.as_deref()), (Failed, Some("no route")));
