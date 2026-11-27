@@ -34,6 +34,12 @@ impl LndDispatcher {
     }
 }
 
+/// Callers set the cap (see `default_fee_cap_sat`); a fallback here would
+/// compute it from the intent amount, which is 0 for fixed-amount invoices.
+fn fee_cap(intent: &PaymentIntent) -> Result<u64, String> {
+    intent.max_fee_sat.ok_or_else(|| "lightning payment needs a fee cap".into())
+}
+
 fn label(intent: &PaymentIntent) -> String {
     format!("{LABEL_PREFIX}{}", intent.intent_id)
 }
@@ -42,6 +48,7 @@ impl Dispatcher for LndDispatcher {
     async fn prepare(&self, intent: &PaymentIntent) -> Result<String, String> {
         match intent.kind {
             PaymentKind::LightningInvoice => {
+                fee_cap(intent)?;
                 let pr = self
                     .client
                     .lightning()
@@ -85,7 +92,7 @@ impl LndDispatcher {
             payment_request: intent.destination.clone(),
             // Only for zero-amount invoices; LND rejects amt on fixed-amount ones.
             amt: if amount > 0 { amount as i64 } else { 0 },
-            fee_limit_sat: intent.max_fee_sat.unwrap_or_else(|| default_fee_cap_sat(amount)) as i64,
+            fee_limit_sat: fee_cap(intent).expect("prepare rejects a missing fee cap") as i64,
             timeout_seconds: (PAY_TIMEOUT.as_secs() - 5) as i32,
             no_inflight_updates: true,
             ..Default::default()
@@ -224,6 +231,14 @@ mod tests {
         assert_eq!(default_fee_cap_sat(0), 10);
         assert_eq!(default_fee_cap_sat(500), 10);
         assert_eq!(default_fee_cap_sat(2_000_000), 20_000);
+    }
+
+    #[test]
+    fn missing_fee_cap_is_refused_not_defaulted() {
+        let mut i = PaymentIntent::new("i", PaymentKind::LightningInvoice, "lnbcrt…", None, None);
+        assert!(fee_cap(&i).is_err());
+        i.max_fee_sat = Some(500);
+        assert_eq!(fee_cap(&i), Ok(500));
     }
 
     #[test]
