@@ -80,16 +80,19 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
     /// intents are stamped with it and recovery skips other nodes' intents.
     /// The first value wins: a backend talks to one node.
     pub fn set_node(&self, identity_pubkey: &str) {
-        let _ = self.node.set(identity_pubkey.to_string());
+        if !identity_pubkey.is_empty() {
+            let _ = self.node.set(identity_pubkey.to_string());
+        }
     }
 
     /// Whether `intent` belongs to this engine's node. Intents with no node
-    /// (journaled before nodes were recorded) and engines that do not know
-    /// their node keep the old single-node behavior.
+    /// (journaled before nodes were recorded) are claimed by any node; an
+    /// engine that does not know its node claims only those.
     pub fn owns(&self, intent: &PaymentIntent) -> bool {
         match (self.node.get(), &intent.node) {
             (Some(me), Some(n)) => me == n,
-            _ => true,
+            (None, Some(_)) => false,
+            (_, None) => true,
         }
     }
 
@@ -188,7 +191,14 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
             let result = if intent.state == IntentState::Signing {
                 ReconcileResult::NotFound
             } else {
-                self.dispatcher.lookup(&intent).await
+                match self.dispatcher.lookup(&intent).await {
+                    // A legacy intent may belong to another node: "not found
+                    // here" proves nothing, so a human decides.
+                    ReconcileResult::NotFound if intent.node.is_none() && self.node.get().is_some() => {
+                        ReconcileResult::Unknown
+                    }
+                    r => r,
+                }
             };
             let next = intent.reconcile(&result, &(self.now)())?;
             self.store.save(&next)?;
@@ -216,10 +226,12 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
     }
 
     /// This node's first intent of `kind` whose fate is still open
-    /// (`InFlight` or `NeedsRecovery`).
+    /// (`Signing`, `InFlight` or `NeedsRecovery`).
+    /// shortcut: check-then-submit is not atomic across concurrent sends;
+    /// serialize sends if two can ever race.
     pub fn unresolved(&self, kind: PaymentKind) -> Result<Option<PaymentIntent>, EngineError> {
         Ok(self.store.list()?.into_iter().find(|i| {
-            i.kind == kind && matches!(i.state, IntentState::InFlight | IntentState::NeedsRecovery) && self.owns(i)
+            i.kind == kind && (i.state.is_interrupted() || i.state == IntentState::NeedsRecovery) && self.owns(i)
         }))
     }
 
