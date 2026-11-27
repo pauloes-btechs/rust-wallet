@@ -121,17 +121,7 @@ impl LndDispatcher {
         };
         match self.client.lightning().send_coins(req).await {
             Ok(r) => DispatchOutcome::Settled { backend_ref: r.into_inner().txid },
-            Err(s) => match s.code() {
-                Code::InvalidArgument | Code::FailedPrecondition | Code::OutOfRange => {
-                    DispatchOutcome::DefinitiveFailure { reason: s.message().to_string() }
-                }
-                // Insufficient funds and similar wallet errors come back as Unknown
-                // with a clear message; anything transport-shaped is ambiguous.
-                Code::Unknown if s.message().contains("insufficient") => {
-                    DispatchOutcome::DefinitiveFailure { reason: s.message().to_string() }
-                }
-                _ => DispatchOutcome::Timeout,
-            },
+            Err(s) => classify_coins_error(&s),
         }
     }
 
@@ -222,6 +212,22 @@ fn classify_send_error(s: &tonic::Status) -> DispatchOutcome {
     }
 }
 
+/// Errors from SendCoins. Only validation and wallet errors prove nothing
+/// was broadcast; anything else (transport, duplicate) must be reconciled.
+fn classify_coins_error(s: &tonic::Status) -> DispatchOutcome {
+    match s.code() {
+        Code::InvalidArgument | Code::FailedPrecondition | Code::OutOfRange => {
+            DispatchOutcome::DefinitiveFailure { reason: s.message().to_string() }
+        }
+        // Insufficient funds and similar wallet errors come back as Unknown
+        // with a clear message; anything transport-shaped is ambiguous.
+        Code::Unknown if s.message().contains("insufficient") => {
+            DispatchOutcome::DefinitiveFailure { reason: s.message().to_string() }
+        }
+        _ => DispatchOutcome::Timeout,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +259,22 @@ mod tests {
             DispatchOutcome::DefinitiveFailure { .. }
         ));
         assert_eq!(classify_send_error(&tonic::Status::unavailable("eof")), DispatchOutcome::Timeout);
+    }
+
+    #[test]
+    fn duplicate_send_coins_is_ambiguous_not_failed() {
+        assert_eq!(
+            classify_coins_error(&tonic::Status::unknown("transaction already exists")),
+            DispatchOutcome::Timeout
+        );
+        assert_eq!(classify_coins_error(&tonic::Status::unavailable("eof")), DispatchOutcome::Timeout);
+        assert_eq!(classify_coins_error(&tonic::Status::deadline_exceeded("timeout")), DispatchOutcome::Timeout);
+        for s in [
+            tonic::Status::invalid_argument("invalid address"),
+            tonic::Status::unknown("insufficient funds available to construct transaction"),
+        ] {
+            assert!(matches!(classify_coins_error(&s), DispatchOutcome::DefinitiveFailure { .. }), "{s:?}");
+        }
     }
 
     #[test]
