@@ -116,6 +116,31 @@ async fn prepare_failure_is_local_and_terminal() {
     assert_eq!(fake.dispatches.load(Ordering::SeqCst), 0);
 }
 
+/// The guard on-chain sends use: an ambiguous send blocks the next one
+/// until it is reconciled, and settled or other nodes' intents do not.
+#[tokio::test]
+async fn unresolved_finds_only_open_intents_of_this_node_and_kind() {
+    let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
+    let fake = Arc::new(Fake::default());
+    let e = engine(store.clone(), fake.clone());
+    e.set_node("node-a");
+    *fake.outcome.lock().unwrap() = Some(DispatchOutcome::Timeout);
+    let i = e.submit(PaymentKind::Onchain, "bcrt1…", Some(1000), None).unwrap();
+    e.execute(&i.intent_id).await.unwrap();
+    assert_eq!(e.unresolved(PaymentKind::Onchain).unwrap().map(|u| u.intent_id), Some(i.intent_id.clone()));
+    assert_eq!(e.unresolved(PaymentKind::LightningInvoice).unwrap(), None);
+
+    let other = engine(store.clone(), fake.clone());
+    other.set_node("node-b");
+    assert_eq!(other.unresolved(PaymentKind::Onchain).unwrap(), None);
+
+    // Unknown lookup → needs-recovery still blocks; resolving it unblocks.
+    e.recover_interrupted().await.unwrap();
+    assert!(e.unresolved(PaymentKind::Onchain).unwrap().is_some());
+    e.resolve_needs_recovery(&i.intent_id, &RecoveryOutcome::Settled { backend_ref: "tx".into() }).unwrap();
+    assert_eq!(e.unresolved(PaymentKind::Onchain).unwrap(), None);
+}
+
 mod crash_recovery {
     use super::*;
 

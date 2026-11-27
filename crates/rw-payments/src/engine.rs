@@ -215,6 +215,14 @@ impl<S: IntentStore, D: Dispatcher> PaymentEngine<S, D> {
         self.store.get(intent_id)?.ok_or_else(|| EngineError::UnknownIntent(intent_id.into()))
     }
 
+    /// This node's first intent of `kind` whose fate is still open
+    /// (`InFlight` or `NeedsRecovery`).
+    pub fn unresolved(&self, kind: PaymentKind) -> Result<Option<PaymentIntent>, EngineError> {
+        Ok(self.store.list()?.into_iter().find(|i| {
+            i.kind == kind && matches!(i.state, IntentState::InFlight | IntentState::NeedsRecovery) && self.owns(i)
+        }))
+    }
+
     pub fn list(&self) -> Result<Vec<PaymentIntent>, EngineError> {
         Ok(self.store.list()?)
     }
