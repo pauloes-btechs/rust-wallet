@@ -38,7 +38,9 @@ known in advance. The unique label is persisted first and attached to the
 transaction, which makes on-chain sends reconcilable too.
 `SendCoins` has no idempotency key, so while any on-chain intent of the
 node is `InFlight` or `NeedsRecovery`, a new on-chain send is refused until
-recovery (on reconnect, or `rw recover`) or `rw resolve` closes it.
+recovery (on reconnect, or `rw recover`) or `rw resolve` closes it. A label
+that is not (yet) in `GetTransactions` is ambiguous, so it becomes
+`NeedsRecovery`, never "never reached node".
 
 ## Fee policy
 
