@@ -87,8 +87,10 @@ impl LitdBackend {
         let Ok(info) = self.client.lightning().get_info(lnrpc::GetInfoRequest {}).await else {
             return Ok(RecoveryReport::default());
         };
-        let net = map::node_health(&info.into_inner()).network().ok_or(BackendOpenError::UnknownNetwork)?;
+        let info = info.into_inner();
+        let net = map::node_health(&info).network().ok_or(BackendOpenError::UnknownNetwork)?;
         self.mainnet.check(net)?;
+        self.engine.set_node(&info.identity_pubkey);
         self.engine.recover_interrupted().await.map_err(|e| BackendOpenError::Recovery(e.to_string()))
     }
 
@@ -127,6 +129,7 @@ impl LitdBackend {
         let info = self.client.lightning().get_info(lnrpc::GetInfoRequest {}).await.map_err(rpc)?.into_inner();
         let net = map::node_health(&info).network().ok_or_else(|| ApiError::Other("node reported no chain".into()))?;
         self.mainnet.check(net)?;
+        self.engine.set_node(&info.identity_pubkey);
         Ok(net)
     }
 

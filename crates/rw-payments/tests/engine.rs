@@ -193,6 +193,46 @@ mod crash_recovery {
         assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
     }
 
+    /// One journal, two nodes: recovering against node B must not touch
+    /// node A's in-flight intent (B's lookup would say not-found).
+    #[tokio::test]
+    async fn recovery_skips_other_nodes_intents() {
+        let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
+        let fake = Arc::new(Fake::default());
+        let a = engine(store.clone(), fake.clone());
+        a.set_node("node-a");
+        let i = a.submit(PaymentKind::LightningInvoice, "lnbcrt…", None, None).unwrap();
+        assert_eq!(i.node.as_deref(), Some("node-a"));
+        a.execute(&i.intent_id).await.unwrap();
+
+        *fake.lookup_result.lock().unwrap() = Some(ReconcileResult::NotFound);
+        let b = engine(store.clone(), fake.clone());
+        b.set_node("node-b");
+        assert_eq!(b.recover_interrupted().await.unwrap(), RecoveryReport::default());
+        assert_eq!(fake.lookups.load(Ordering::SeqCst), 0);
+        assert_eq!(store.get(&i.intent_id).unwrap().unwrap().state, IntentState::InFlight);
+
+        *fake.lookup_result.lock().unwrap() = Some(ReconcileResult::Settled { backend_ref: "h".into() });
+        assert_eq!(a.recover_interrupted().await.unwrap().reconciled, vec![i.intent_id.clone()]);
+        assert_eq!(store.get(&i.intent_id).unwrap().unwrap().state, IntentState::Settled);
+    }
+
+    /// Intents journaled before nodes were recorded are still recovered.
+    #[tokio::test]
+    async fn legacy_intent_without_node_is_still_recovered() {
+        let store: Arc<dyn IntentStore> = Arc::new(MemoryStore::default());
+        let fake = Arc::new(Fake::default());
+        let legacy = engine(store.clone(), fake.clone());
+        let i = legacy.submit(PaymentKind::LightningInvoice, "lnbcrt…", None, None).unwrap();
+        legacy.execute(&i.intent_id).await.unwrap();
+        assert_eq!(store.get(&i.intent_id).unwrap().unwrap().node, None);
+
+        *fake.lookup_result.lock().unwrap() = Some(ReconcileResult::Settled { backend_ref: "h".into() });
+        let e = engine(store.clone(), fake.clone());
+        e.set_node("node-a");
+        assert_eq!(e.recover_interrupted().await.unwrap().reconciled, vec![i.intent_id]);
+    }
+
     #[tokio::test]
     async fn sqlite_preserves_order_and_body() {
         let s = SqliteStore::in_memory().unwrap();
